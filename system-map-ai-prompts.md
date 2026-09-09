@@ -1,51 +1,33 @@
-# Tech Stack (AI) — Session Log
+# System Map AI Prompts
 
-A record of the prompts/questions used with Claude to research and fill out `tech-stack-ai.md`.
+## 1. Describe the System
 
-## 1a. Config Files
+I'd like an ASCII diagram that tells me about the system in the lms folder. I need a rundown of all the services, ports, and frameworks and how they each connect. Can you please output it here to the terminal?
 
-- "Can you please tell me what config files are present in workspace/lms?"
-- "Can you tell me about each one first, and ask me to approve its addition?"
-- "Can you please add each of these to the file?"
-- "Can we please section 1a off by repo?"
+❯ does the diagram represent how the systems communicate re: the arrows? in terms of whether they both send each other things, so both directions, or one just sending to another, so one directional arrow
 
-Investigation approach: searched each repo (excluding `node_modules`/`.git`) for common config file patterns (`.env`, `docker-compose*`, `Dockerfile*`, `*.yml`/`.yaml`, `*.ini`, `*.conf`, `settings.py`), then read each file's contents to summarize its purpose. For `.env` files containing real secrets, reviewed the corresponding `.env.template` (or grepped variable names only) instead of the live file, to avoid exposing credential values in the doc.
+Good catch — it's inconsistent. Some arrows show "who initiates the connection," others show "which way the data conceptually flows," and I mixed the two conventions without being clear about it. Here's the honest breakdown per connection:
 
-## 1b. How to Start It
+Truly bidirectional (request → response, shown correctly as two-way):
+- Client ↔ API — client sends the HTTP request, API sends back JSON. This one I drew accurately with two separate arrows.
 
-- "Can you tell me what you can see about how to start it?"
-- "So I believe the how to start it question is really just about the command to bring the whole system up."
-- "Can you tell me more about the mechanics behind the `make up` command according to the files?"
-- "Maybe too much information now — can we put the first answer re `make up` with the Monarch caveat, plus just that it is doing `docker compose up --build -d` and `docker compose logs -f`?"
+One I drew as one-directional but is actually request/response (should be two-way):
+- API → database — I only drew the query going down. Postgres also returns rows/results back up to the API. Same for Monarch → GitHub — I drew a single downward arrow, but GitHub returns issue data/confirmations back to Monarch.
 
-Investigation approach: read each repo's `README.md`, `learn-ops-infrastructure/Makefile`, `learn-ops-infrastructure/SETUP_README.md`, and `learn-ops-api/entrypoint.sh` to determine the actual startup commands and what happens during container boot.
+One I got backwards entirely:
+- database → postgres_exporter — I drew this pointing from the database down to the exporter. That's wrong. postgres_exporter is the one that opens a connection to Postgres and queries its stats views. The arrow should point postgres_exporter → database.
 
-## 1c. Where to Access It
+Pull/scrape connections (connection is initiated by the receiver, but the arrow shows the metrics payload, which is the opposite direction):
+- Prometheus → API, Prometheus → postgres_exporter, Prometheus → Monarch — in reality Prometheus opens the connection and does the GET, so the initiation arrow points Prometheus → target, but the thing you probably care about (metrics data) flows target → Prometheus. I drew these as if data flows toward Prometheus, which is defensible but I didn't label which direction was "connection" vs "payload."
+- Grafana ← Prometheus — same issue: Grafana initiates the query, Prometheus's response is the data. I drew it as Prometheus → Grafana (payload direction), not showing that Grafana is the one opening the connection.
 
-- "Yes, tell me more about 1c."
+Pub/sub (same ambiguity as scraping, just inverted):
+- Valkey → Monarch labeled "SUBSCRIBE" and Valkey → valkey-monitor labeled "MONITOR" — these arrows show message push direction correctly (Valkey does push data to subscribers), but the label is misleading: it's actually Monarch/valkey-monitor that initiates the connection and issues the SUBSCRIBE/MONITOR command to Valkey. So connection-initiation goes the opposite way from what the arrow shows.
+- API → Valkey PUBLISH — this one's clean, genuinely one-directional, fire-and-forget, no response needed.
 
-Investigation approach: cross-referenced port mappings across all three `docker-compose.yml` files (`learn-ops-infrastructure`, `learn-ops-infrastructure/valkey`, `service-monarch`) to build the service → port → URL table.
+Genuinely one-directional, no ambiguity:
+- Monarch → Slack (webhook/bot notification) — Monarch sends, Slack doesn't push anything back to Monarch on its own initiative.
 
-## 1d. Service Dependencies
+So short answer: the diagram conflates "who opens the connection" with "which way data flows," and one arrow (database↔postgres_exporter) is flipped outright. Want me to redraw it with a consistent convention — e.g., solid arrow = who initiates/connects, and a small ⇢ or annotation for response/payload direction?
 
-- "Yes, tell me more about 1d."
-
-Investigation approach: read `depends_on` blocks across all three compose files; discovered Valkey lives in its own separate `docker-compose.yml` (not the main infrastructure one) by grepping for "valkey" across the repo and finding `learn-ops-infrastructure/valkey/docker-compose.yml`.
-
-## 1e. Main Entry Points
-
-- "Yes, tell me more about 1e."
-
-Investigation approach: located `manage.py` and `urls.py` files for the Django API, `src/index.js` and the React Router usage in `src/components/LearnOps.js` for the client, and `service/main.py` plus `service/custom_logging/web_interface.py` for Monarch.
-
-## 2. Services
-
-- "Yes, tell me more about section 2."
-
-Investigation approach: pulled version info from `learn-ops-api/Pipfile.lock` (Django, DRF), `learn-ops-client/package.json` (React, react-router-dom, Radix UI), and `service-monarch/requirements.txt` (Flask, pydantic, prometheus-client, etc.), combined with the base images from each Dockerfile.
-
-## 3. System Overview
-
-- "Yes, tell me more about section 3."
-
-Investigation approach: synthesized the dependency graph and entry-point findings from 1d/1e, plus the architecture diagram in `learn-ops-infrastructure/README.md` — noting that the README's diagram includes a "Hashtagger Service" marked "this will be added," which doesn't exist in the codebase yet and was excluded from the current-state diagram.
+## 2. Convert to a Mermaid Diagram
